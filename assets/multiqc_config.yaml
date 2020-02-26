@@ -13,7 +13,15 @@ report_section_order:
 export_plots: true
 
 top_modules:
-- 'fastqc'
+- 'fastqc':
+     name: 'FastQC: raw'
+     path_filters_exclude: 
+        - '*trimmed_fastqc*'
+- 'fastqc':
+     name: 'FastQC: after trimming'
+     info: 'FastQC after applying TrimGalore for adapter removal.'
+     path_filters: 
+        - '*trimmed_fastqc*'
 - 'picard'
 - 'samtools'
 - 'qualimap'

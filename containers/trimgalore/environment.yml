@@ -1,0 +1,10 @@
+# You can use this file to create a conda environment for this pipeline:
+#   conda env create -f environment.yml
+name: sarek-trimgalore-2.5.2
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.7.3      # trim-galore/cutadapt parallelization not supported for python 2
+  - trim-galore=0.6.2

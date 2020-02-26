@@ -69,6 +69,7 @@ def helpMessage() {
         --vep_cache                 Specity the path to VEP cache, to be used with --annotation_cache
         --pon                       panel-of-normals VCF (bgzipped, indexed). See: https://software.broadinstitute.org/gatk/documentation/tooldocs/current/org_broadinstitute_hellbender_tools_walkers_mutect_CreateSomaticPanelOfNormals.php
         --pon_index                 index of pon panel-of-normals VCF
+        --trim_reads                Enable read trimming with TrimGalore
 
     References                      If not specified in the configuration file or you wish to overwrite any of the references.
         --acLoci                    acLoci file
@@ -305,6 +306,7 @@ if ('strelka' in tools && 'manta' in tools )   summary['Strelka BP']        = pa
 if (params.sequencing_center)                  summary['Sequenced by']      = params.sequencing_center
 if (params.pon && 'mutect2' in tools)          summary['Panel of normals']  = params.pon
 
+summary['Trim reads']        = params.trim_reads ? 'Yes' : 'No'
 summary['Save Genome Index'] = params.saveGenomeIndex ? 'Yes' : 'No'
 summary['Nucleotides/s']     = params.nucleotidesPerSecond
 summary['Output dir']        = params.outdir
@@ -755,15 +757,46 @@ fastQCReport = fastQCFQReport.mix(fastQCBAMReport)
 
 fastQCReport = fastQCReport.dump(tag:'FastQC')
 
-// STEP 1: MAPPING READS TO REFERENCE GENOME WITH BWA MEM
-
 inputPairReads = inputPairReads.dump(tag:'INPUT')
 
-inputPairReads = inputPairReads.mix(inputBam)
+if (!params.trim_reads){
+    inputPairReadsTrimmed = inputPairReads
+    trimmedFastQCFQReport = Channel.create()
+} else {
+    process TrimReads {
+        label 'cpus_8'
 
-(inputPairReads, inputPairReadsSentieon) = inputPairReads.into(2)
-if (params.sentieon) inputPairReads.close()
-else inputPairReadsSentieon.close()
+        tag {idPatient + "-" + idRun}
+
+        publishDir "${params.outdir}/Reports/${idSample}/TrimmedFastQC/${idSample}_${idRun}/", pattern: "*_fastqc.*", mode: params.publishDirMode
+        publishDir "${params.outdir}/Reports/${idSample}/TrimGalore/${idSample}_${idRun}/", pattern: "*trimming_report.txt", mode: params.publishDirMode
+
+        input:
+            set idPatient, idSample, idRun, file(inputFile1), file(inputFile2) from inputPairReads
+
+        output:
+            set idPatient, idSample, idRun, file("${idSample}_${idRun}_R1_val_1.fq.gz"), file("${idSample}_${idRun}_R2_val_2.fq.gz") into inputPairReadsTrimmed           
+            file("*_fastqc.{html,zip}") into trimmedFastQCFQReport
+            file("*trimming_report.txt")
+
+        script:
+        """
+        trim_galore --cores ${task.cpus} --gzip --basename "${idSample}_${idRun}" --paired $inputFile1 $inputFile2 --fastqc 
+        mv *1_fastqc.html "${idSample}_${idRun}.R1.trimmed_fastqc.html"
+        mv *2_fastqc.html "${idSample}_${idRun}.R2.trimmed_fastqc.html"
+        mv *1_fastqc.zip "${idSample}_${idRun}.R1.trimmed_fastqc.zip"
+        mv *2_fastqc.zip "${idSample}_${idRun}.R2.trimmed_fastqc.zip"
+        """
+    }
+}
+
+inputPairReadsTrimmed = inputPairReadsTrimmed.mix(inputBam)   // TODO don't know how to trim adapter from uBAM files (not fdone for those currently)... handle
+
+// STEP 1: MAPPING READS TO REFERENCE GENOME WITH BWA MEM
+
+(inputPairReadsTrimmed, inputPairReadsTrimmedSentieon) = inputPairReadsTrimmed.into(2)
+if (params.sentieon) inputPairReadsTrimmed.close()
+else inputPairReadsTrimmedSentieon.close()
 
 process MapReads {
     label 'cpus_max'
@@ -771,7 +804,7 @@ process MapReads {
     tag {idPatient + "-" + idRun}
 
     input:
-        set idPatient, idSample, idRun, file(inputFile1), file(inputFile2) from inputPairReads
+        set idPatient, idSample, idRun, file(inputFile1), file(inputFile2) from inputPairReadsTrimmed
         file(bwaIndex) from ch_bwaIndex
         file(fasta) from ch_fasta
         file(fastaFai) from ch_fastaFai
@@ -824,7 +857,7 @@ process SentieonMapReads {
     tag {idPatient + "-" + idRun}
 
     input:
-        set idPatient, idSample, idRun, file(inputFile1), file(inputFile2) from inputPairReadsSentieon
+        set idPatient, idSample, idRun, file(inputFile1), file(inputFile2) from inputPairReadsTrimmedSentieon
         file(bwaIndex) from ch_bwaIndex
         file(fasta) from ch_fasta
         file(fastaFai) from ch_fastaFai
@@ -2991,6 +3024,7 @@ process MultiQC {
         file ('bamQC/*') from bamQCReport.collect().ifEmpty([])
         file ('BCFToolsStats/*') from bcftoolsReport.collect().ifEmpty([])
         file ('FastQC/*') from fastQCReport.collect().ifEmpty([])
+        file ('TrimmedFastQC/*') from trimmedFastQCFQReport.collect().ifEmpty([])
         file ('MarkDuplicates/*') from markDuplicatesReport.collect().ifEmpty([])
         file ('SamToolsStats/*') from samtoolsStatsReport.collect().ifEmpty([])
         file ('snpEff/*') from snpeffReport.collect().ifEmpty([])
