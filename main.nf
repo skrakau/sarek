@@ -761,7 +761,7 @@ inputPairReads = inputPairReads.dump(tag:'INPUT')
 
 if (!params.trim_reads){
     inputPairReadsTrimmed = inputPairReads
-    trimmedFastQCFQReport = Channel.create()
+    trimmedFastQCFQReport = Channel.empty()
 } else {
     process TrimReads {
         label 'cpus_8'
